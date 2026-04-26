@@ -87,3 +87,12 @@ Use these as directional numbers; production figures depend on topology, TTL str
 - Add multi-region replication strategy for geo-distributed deployments
 - Provide ready-to-run benchmark harness and reproducible reports
 - Add observability dashboards for rejection reason and hot-key analysis
+
+## Benchmark Methodology
+
+To keep benchmark claims comparable across revisions, run tests with:
+
+- Fixed request mix and fixed key-cardinality profile
+- Warmed Redis instance and stable network path
+- Reported p50/p95 latency plus total rejected/allowed ratio
+- Same script version and identical Redis configuration
