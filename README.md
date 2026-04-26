@@ -1,5 +1,7 @@
 # Distributed Rate Limiter
 
+> 🚪 Used behind our own Custom API Gateway for centralized traffic control.
+
 A high-performance distributed rate limiter built with Redis and Lua scripts for concurrency-safe request throttling across multiple API instances.
 
 ---
@@ -21,11 +23,16 @@ When traffic is served by many application instances, in-memory counters produce
 
 ```mermaid
 flowchart LR
-    Client["Client"] --> ApiNodes["API Nodes"]
-    ApiNodes --> RateLimiter["RateLimiter Component"]
-    RateLimiter --> RedisLua["Redis (Lua Script)"]
-    RedisLua --> Decision["Allow / Reject"]
-    Decision --> ApiNodes
+    Client["Client"] --> Gateway["Custom API Gateway"]
+    Gateway --> KeyResolver["Limit Key Resolver"]
+    KeyResolver --> Strategy["Strategy Selector"]
+    Strategy --> RedisLua["Redis Lua Atomic Check+Update"]
+    RedisLua --> Allowed{"Allowed?"}
+    Allowed -->|Yes| Forward["Forward Request to Service"]
+    Allowed -->|No| Reject["Return 429 Too Many Requests"]
+    Forward --> Metrics["Emit Metrics/Tracing"]
+    Reject --> Metrics
+    Metrics --> Gateway
 ```
 
 ## How it works (high level)
