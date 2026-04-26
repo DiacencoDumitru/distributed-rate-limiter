@@ -17,15 +17,26 @@ When traffic is served by many application instances, in-memory counters produce
 - Strategy-oriented design for adding new algorithms
 - Low-latency decision path suitable for gateway-level use
 
-## Architecture Overview
+## Architecture
 
-`Client -> API -> RateLimiter -> Redis (Lua Script) -> Allow/Reject`
+```mermaid
+flowchart LR
+    Client["Client"] --> ApiNodes["API Nodes"]
+    ApiNodes --> RateLimiter["RateLimiter Component"]
+    RateLimiter --> RedisLua["Redis (Lua Script)"]
+    RedisLua --> Decision["Allow / Reject"]
+    Decision --> ApiNodes
+```
 
-- API nodes remain stateless for scaling
-- Redis stores counters, timestamps, and refill metadata
-- Lua script performs read + compute + write in one atomic step
+## How it works (high level)
 
-## How It Works
+- Client requests arrive at stateless API nodes.
+- The rate limiter computes the effective key (user, route, or global scope).
+- A Redis Lua script executes limit check and counter update atomically.
+- The script returns a single decision: allow or reject.
+- API responds immediately and avoids race conditions across nodes.
+
+## How It Works (Detailed)
 
 ### Token Bucket
 
