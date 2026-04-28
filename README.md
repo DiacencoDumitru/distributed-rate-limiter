@@ -1,116 +1,88 @@
 # Distributed Rate Limiter
 
-> 🚪 Used behind our own Custom API Gateway for centralized traffic control.
+Spring Boot сервис распределенного rate limiting на Redis Lua.
 
-A high-performance distributed rate limiter built with Redis and Lua scripts for concurrency-safe request throttling across multiple API instances.
+## Что реализовано в этом feature PR
 
----
+- API endpoint: `POST /api/v1/rate-limit/check`
+- 2 стратегии лимитирования:
+  - `FIXED_WINDOW`
+  - `TOKEN_BUCKET`
+- Атомарная проверка и обновление состояния через Lua в Redis
+- Интеграционные тесты на Testcontainers (Redis)
 
-## Problem It Solves
+## Технологии
 
-When traffic is served by many application instances, in-memory counters produce inconsistent limits and race conditions. This project centralizes rate-limit state in Redis and uses atomic Lua execution to keep decisions correct under concurrent load.
+- Java 21
+- Spring Boot 3
+- Spring Data Redis
+- Redis Lua scripts
+- JUnit 5 + Testcontainers
 
-## Key Features
+## Запуск локально
 
-- Supports Token Bucket and Sliding Window strategies
-- Atomic check-and-update logic via Redis Lua scripts
-- Multi-instance safe with shared Redis-backed state
-- Per-user, per-key, and global throttling support
-- Strategy-oriented design for adding new algorithms
-- Low-latency decision path suitable for gateway-level use
+1. Поднять Redis:
 
-## Architecture
-
-```mermaid
-flowchart LR
-    Client["Client"] --> Gateway["Custom API Gateway"]
-    Gateway --> KeyResolver["Limit Key Resolver"]
-    KeyResolver --> Strategy["Strategy Selector"]
-    Strategy --> RedisLua["Redis Lua Atomic Check+Update"]
-    RedisLua --> Allowed{"Allowed?"}
-    Allowed -->|Yes| Forward["Forward Request to Service"]
-    Allowed -->|No| Reject["Return 429 Too Many Requests"]
-    Forward --> Metrics["Emit Metrics/Tracing"]
-    Reject --> Metrics
-    Metrics --> Gateway
+```bash
+docker run --name drl-redis -p 6379:6379 -d redis:7.4-alpine
 ```
 
-## How it works (high level)
+2. Запустить приложение:
 
-- Client requests arrive at stateless API nodes.
-- The rate limiter computes the effective key (user, route, or global scope).
-- A Redis Lua script executes limit check and counter update atomically.
-- The script returns a single decision: allow or reject.
-- API responds immediately and avoids race conditions across nodes.
-
-## How It Works (Detailed)
-
-### Token Bucket
-
-- Each subject receives a bucket with `capacity` and `refill_rate`
-- Tokens are refilled based on elapsed time
-- Request consumes one token if available
-- Request is rejected when bucket is empty
-
-### Sliding Window
-
-- Requests are tracked inside a moving time window
-- Old entries are removed as the window advances
-- Decision is based on count within current window
-- Provides tighter control against burst abuse
-
-## Atomicity with Lua
-
-Redis Lua scripts guarantee that limit evaluation and state mutation run as one operation:
-
-```lua
--- simplified flow
-local current = redis.call("GET", key) or "0"
-if tonumber(current) < limit then
-  redis.call("INCR", key)
-  return 1
-else
-  return 0
-end
+```bash
+./mvnw spring-boot:run
 ```
 
-This prevents race conditions that appear when read/update are split across multiple round trips.
+Если `mvnw` отсутствует:
 
-## Performance / Benchmarks
+```bash
+mvn spring-boot:run
+```
 
-Representative baseline for a local setup (single Redis instance, pipelined client, warm cache):
+## Пример запроса
 
-- Decision latency: typically 1-2 ms p50
-- Throughput: scales with Redis CPU/network and key cardinality
-- Lua overhead: negligible compared to network cost in most deployments
+```http
+POST /api/v1/rate-limit/check
+Content-Type: application/json
 
-Use these as directional numbers; production figures depend on topology, TTL strategy, and traffic distribution.
+{
+  "key": "user-123",
+  "strategy": "FIXED_WINDOW",
+  "limit": 5,
+  "windowSeconds": 10
+}
+```
 
-## Example Use Cases
+## Пример ответа (allow)
 
-- API gateway throttling per API key
-- Login and OTP brute-force protection
-- Abuse prevention for high-cost endpoints
-- Fair-usage limits across tenant plans
+```json
+{
+  "allowed": true,
+  "remaining": 4,
+  "retryAfterSeconds": 0
+}
+```
 
-## Trade-offs and Design Decisions
+## Пример ответа (reject)
 
-- Redis is chosen for speed and atomic primitives over strong relational consistency
-- Lua scripting increases correctness and determinism, but adds script lifecycle management
-- Sliding Window provides precision with higher state cost than coarse-grained counters
+HTTP `429 Too Many Requests`
 
-## Next Improvements
+```json
+{
+  "allowed": false,
+  "remaining": 0,
+  "retryAfterSeconds": 3
+}
+```
 
-- Add adaptive limits based on user tier and traffic behavior
-- Add multi-region replication strategy for geo-distributed deployments
-- Provide ready-to-run benchmark harness and reproducible reports
-- Add observability dashboards for rejection reason and hot-key analysis
+## Тесты
 
-## Benchmark Methodology
+```bash
+./mvnw test
+```
 
-To keep benchmark claims comparable across revisions, run tests with:
+или
 
-- Fixed request mix and fixed key-cardinality profile
-- Warmed Redis instance and stable network path
-- Reported p50/p95 latency plus total rejected/allowed ratio
-- Same script version and identical Redis configuration
+```bash
+mvn test
+```
