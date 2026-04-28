@@ -1,17 +1,17 @@
 # Distributed Rate Limiter
 
-Spring Boot сервис распределенного rate limiting на Redis Lua.
+Distributed rate limiter service built with Spring Boot, Redis, and Lua scripts.
 
-## Что реализовано в этом feature PR
+## Implemented In This Feature PR
 
 - API endpoint: `POST /api/v1/rate-limit/check`
-- 2 стратегии лимитирования:
+- Two rate limiting strategies:
   - `FIXED_WINDOW`
   - `TOKEN_BUCKET`
-- Атомарная проверка и обновление состояния через Lua в Redis
-- Интеграционные тесты на Testcontainers (Redis)
+- Atomic check-and-update logic using Redis Lua
+- Integration tests with Testcontainers (Redis)
 
-## Технологии
+## Tech Stack
 
 - Java 21
 - Spring Boot 3
@@ -19,27 +19,27 @@ Spring Boot сервис распределенного rate limiting на Redis
 - Redis Lua scripts
 - JUnit 5 + Testcontainers
 
-## Запуск локально
+## Run Locally
 
-1. Поднять Redis:
+1. Start Redis:
 
 ```bash
 docker run --name drl-redis -p 6379:6379 -d redis:7.4-alpine
 ```
 
-2. Запустить приложение:
+2. Run the application:
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-Если `mvnw` отсутствует:
+If `mvnw` is not available:
 
 ```bash
 mvn spring-boot:run
 ```
 
-## Пример запроса
+## Request Example
 
 ```http
 POST /api/v1/rate-limit/check
@@ -53,7 +53,7 @@ Content-Type: application/json
 }
 ```
 
-## Пример ответа (allow)
+## Response Example (allow)
 
 ```json
 {
@@ -63,7 +63,7 @@ Content-Type: application/json
 }
 ```
 
-## Пример ответа (reject)
+## Response Example (reject)
 
 HTTP `429 Too Many Requests`
 
@@ -75,13 +75,13 @@ HTTP `429 Too Many Requests`
 }
 ```
 
-## Тесты
+## Tests
 
 ```bash
 ./mvnw test
 ```
 
-или
+or
 
 ```bash
 mvn test
