@@ -26,13 +26,22 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
     }
 
     @Override
-    public RateLimitResult evaluate(RateLimitStrategy strategy, String key, long limit, long windowSeconds) {
-        String redisKey = keyFactory.build(strategy, key);
+    public RateLimitResult evaluateFixedWindow(String key, long limit, long windowSeconds) {
+        String redisKey = keyFactory.build(RateLimitStrategy.FIXED_WINDOW, key);
         Object[] args = {String.valueOf(limit), String.valueOf(windowSeconds)};
-        List result = switch (strategy) {
-            case FIXED_WINDOW -> redisTemplate.execute(fixedWindowScript, List.of(redisKey), args);
-            case TOKEN_BUCKET -> redisTemplate.execute(tokenBucketScript, List.of(redisKey), args);
-        };
+        List result = redisTemplate.execute(fixedWindowScript, List.of(redisKey), args);
+        return toResult(result);
+    }
+
+    @Override
+    public RateLimitResult evaluateTokenBucket(String key, long capacity, long refillSeconds) {
+        String redisKey = keyFactory.build(RateLimitStrategy.TOKEN_BUCKET, key);
+        Object[] args = {String.valueOf(capacity), String.valueOf(refillSeconds)};
+        List result = redisTemplate.execute(tokenBucketScript, List.of(redisKey), args);
+        return toResult(result);
+    }
+
+    private RateLimitResult toResult(List result) {
         if (result == null || result.size() < 3) {
             throw new IllegalStateException("Unexpected Redis Lua result");
         }

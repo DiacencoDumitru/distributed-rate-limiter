@@ -19,7 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class RateLimitApiIntegrationTest {
     @Container
     static final GenericContainer<?> redis = new GenericContainer<>("redis:7.4-alpine").withExposedPorts(6379);
@@ -104,8 +104,8 @@ class RateLimitApiIntegrationTest {
                 {
                   "key":"user-c",
                   "strategy":"TOKEN_BUCKET",
-                  "limit":2,
-                  "windowSeconds":2
+                  "capacity":2,
+                  "refillSeconds":2
                 }
                 """;
 
@@ -135,5 +135,37 @@ class RateLimitApiIntegrationTest {
                         .content(request))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.allowed").value(true));
+    }
+
+    @Test
+    void fixedWindowShouldReturnBadRequestWhenRequiredFieldIsMissing() throws Exception {
+        String request = """
+                {
+                  "key":"user-invalid-fixed",
+                  "strategy":"FIXED_WINDOW",
+                  "windowSeconds":2
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void tokenBucketShouldReturnBadRequestWhenRequiredFieldIsMissing() throws Exception {
+        String request = """
+                {
+                  "key":"user-invalid-token",
+                  "strategy":"TOKEN_BUCKET",
+                  "refillSeconds":2
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest());
     }
 }
