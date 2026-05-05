@@ -39,7 +39,7 @@ If `mvnw` is not available:
 mvn spring-boot:run
 ```
 
-## Request Example
+## Request Examples
 
 ```http
 POST /api/v1/rate-limit/check
@@ -50,6 +50,18 @@ Content-Type: application/json
   "strategy": "FIXED_WINDOW",
   "limit": 5,
   "windowSeconds": 10
+}
+```
+
+```http
+POST /api/v1/rate-limit/check
+Content-Type: application/json
+
+{
+  "key": "user-123",
+  "strategy": "TOKEN_BUCKET",
+  "capacity": 5,
+  "refillSeconds": 10
 }
 ```
 
@@ -86,3 +98,14 @@ or
 ```bash
 mvn test
 ```
+
+## Implementation Notes
+
+The API now uses strategy-specific request models:
+
+- `FIXED_WINDOW` requires `limit` and `windowSeconds`.
+- `TOKEN_BUCKET` requires `capacity` and `refillSeconds`.
+
+At runtime, Jackson resolves the incoming request model by `strategy`.
+Then `RateLimiterService` maps each request type to a dedicated Redis client method.
+Each method executes its own Lua script path with strategy-specific parameters and returns a unified `RateLimitResponse`.

@@ -1,13 +1,19 @@
 package com.example.ratelimiter.api;
 
-import jakarta.validation.constraints.Min;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
-public record RateLimitRequest(
-        @NotBlank String key,
-        @NotNull RateLimitStrategy strategy,
-        @NotNull @Min(1) Long limit,
-        @NotNull @Min(1) Long windowSeconds
-) {
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "strategy", visible = true)
+@JsonSubTypes({
+        @JsonSubTypes.Type(value = FixedWindowRateLimitRequest.class, name = "FIXED_WINDOW"),
+        @JsonSubTypes.Type(value = TokenBucketRateLimitRequest.class, name = "TOKEN_BUCKET")
+})
+public sealed interface RateLimitRequest permits FixedWindowRateLimitRequest, TokenBucketRateLimitRequest {
+    @NotBlank
+    String key();
+
+    @NotNull
+    RateLimitStrategy strategy();
 }
