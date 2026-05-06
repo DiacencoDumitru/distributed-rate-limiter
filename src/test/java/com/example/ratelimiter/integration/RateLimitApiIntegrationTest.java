@@ -138,6 +138,116 @@ class RateLimitApiIntegrationTest {
     }
 
     @Test
+    void adminStateShouldReturnFixedWindowStateWithoutMutatingCounter() throws Exception {
+        String checkRequest = """
+                {
+                  "key":"admin-fixed-user",
+                  "strategy":"FIXED_WINDOW",
+                  "limit":3,
+                  "windowSeconds":10
+                }
+                """;
+        String stateRequest = """
+                {
+                  "key":"admin-fixed-user",
+                  "strategy":"FIXED_WINDOW"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.remaining").value(2));
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.strategy").value("FIXED_WINDOW"))
+                .andExpect(jsonPath("$.exists").value(true))
+                .andExpect(jsonPath("$.currentCount").value(1))
+                .andExpect(jsonPath("$.tokens").doesNotExist())
+                .andExpect(jsonPath("$.lastRefillTimestampSeconds").doesNotExist());
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.currentCount").value(1));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.remaining").value(1));
+    }
+
+    @Test
+    void adminStateShouldReturnTokenBucketStateWithoutMutatingTokens() throws Exception {
+        String checkRequest = """
+                {
+                  "key":"admin-token-user",
+                  "strategy":"TOKEN_BUCKET",
+                  "capacity":2,
+                  "refillSeconds":20
+                }
+                """;
+        String stateRequest = """
+                {
+                  "key":"admin-token-user",
+                  "strategy":"TOKEN_BUCKET"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.strategy").value("TOKEN_BUCKET"))
+                .andExpect(jsonPath("$.exists").value(true))
+                .andExpect(jsonPath("$.currentCount").doesNotExist())
+                .andExpect(jsonPath("$.tokens").isNumber())
+                .andExpect(jsonPath("$.lastRefillTimestampSeconds").isNumber());
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tokens").isNumber());
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.remaining").value(0));
+    }
+
+    @Test
+    void adminStateShouldReturnNotExistingForMissingKey() throws Exception {
+        String stateRequest = """
+                {
+                  "key":"missing-user",
+                  "strategy":"FIXED_WINDOW"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exists").value(false))
+                .andExpect(jsonPath("$.currentCount").doesNotExist())
+                .andExpect(jsonPath("$.tokens").doesNotExist())
+                .andExpect(jsonPath("$.lastRefillTimestampSeconds").doesNotExist());
+    }
+
+    @Test
     void fixedWindowShouldReturnBadRequestWhenRequiredFieldIsMissing() throws Exception {
         String request = """
                 {
@@ -164,6 +274,20 @@ class RateLimitApiIntegrationTest {
                 """;
 
         mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void adminStateShouldReturnBadRequestWhenRequiredFieldIsMissing() throws Exception {
+        String request = """
+                {
+                  "key":"admin-invalid"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isBadRequest());

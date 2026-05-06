@@ -5,6 +5,7 @@ Distributed rate limiter service built with Spring Boot, Redis, and Lua scripts.
 ## Implemented In This Feature PR
 
 - API endpoint: `POST /api/v1/rate-limit/check`
+- Admin API endpoint: `POST /api/v1/admin/rate-limit/state`
 - Two rate limiting strategies:
   - `FIXED_WINDOW`
   - `TOKEN_BUCKET`
@@ -54,6 +55,26 @@ Content-Type: application/json
 ```
 
 ```http
+POST /api/v1/admin/rate-limit/state
+Content-Type: application/json
+
+{
+  "key": "user-123",
+  "strategy": "FIXED_WINDOW"
+}
+```
+
+```http
+POST /api/v1/admin/rate-limit/state
+Content-Type: application/json
+
+{
+  "key": "user-123",
+  "strategy": "TOKEN_BUCKET"
+}
+```
+
+```http
 POST /api/v1/rate-limit/check
 Content-Type: application/json
 
@@ -86,6 +107,36 @@ HTTP `429 Too Many Requests`
   "retryAfterSeconds": 3
 }
 ```
+
+## Admin State Response Example (fixed window)
+
+```json
+{
+  "key": "user-123",
+  "strategy": "FIXED_WINDOW",
+  "exists": true,
+  "ttlSeconds": 8,
+  "currentCount": 2,
+  "tokens": null,
+  "lastRefillTimestampSeconds": null
+}
+```
+
+## Admin State Response Example (token bucket)
+
+```json
+{
+  "key": "user-123",
+  "strategy": "TOKEN_BUCKET",
+  "exists": true,
+  "ttlSeconds": 9,
+  "currentCount": null,
+  "tokens": 1.25,
+  "lastRefillTimestampSeconds": 1714999999.12
+}
+```
+
+Admin state endpoint is read-only and does not consume tokens or increment counters.
 
 ## Tests
 
