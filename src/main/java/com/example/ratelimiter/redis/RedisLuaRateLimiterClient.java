@@ -3,6 +3,7 @@ package com.example.ratelimiter.redis;
 import com.example.ratelimiter.api.RateLimitStrategy;
 import com.example.ratelimiter.service.RateLimitResult;
 import java.util.List;
+import java.util.Objects;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
@@ -39,6 +40,33 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
         Object[] args = {String.valueOf(capacity), String.valueOf(refillSeconds)};
         List result = redisTemplate.execute(tokenBucketScript, List.of(redisKey), args);
         return toResult(result);
+    }
+
+    @Override
+    public String getFixedWindowCurrentCount(String key) {
+        String redisKey = keyFactory.build(RateLimitStrategy.FIXED_WINDOW, key);
+        return redisTemplate.opsForValue().get(redisKey);
+    }
+
+    @Override
+    public List<String> getTokenBucketData(String key) {
+        String redisKey = keyFactory.build(RateLimitStrategy.TOKEN_BUCKET, key);
+        List<Object> result = redisTemplate.opsForHash().multiGet(redisKey, List.of("tokens", "ts"));
+        if (result == null) {
+            return List.of(null, null);
+        }
+        return result.stream()
+                .map(value -> Objects.toString(value, null))
+                .toList();
+    }
+
+    @Override
+    public long getTtlSeconds(String key) {
+        Long ttl = redisTemplate.getExpire(key);
+        if (ttl == null || ttl < 0) {
+            return 0;
+        }
+        return ttl;
     }
 
     private RateLimitResult toResult(List result) {
