@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -26,6 +28,9 @@ class RateLimitApiIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     @DynamicPropertySource
     static void redisProperties(DynamicPropertyRegistry registry) {
@@ -282,6 +287,55 @@ class RateLimitApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.exists").value(true))
                 .andExpect(jsonPath("$.ttlSeconds").value(Matchers.greaterThanOrEqualTo(1)));
+    }
+
+    @Test
+    void rateLimitChecksShouldWorkAfterScriptFlush() throws Exception {
+        String fixedWindowRequest = """
+                {
+                  "key":"evalsha-fixed-user",
+                  "strategy":"FIXED_WINDOW",
+                  "limit":2,
+                  "windowSeconds":5
+                }
+                """;
+        String tokenBucketRequest = """
+                {
+                  "key":"evalsha-token-user",
+                  "strategy":"TOKEN_BUCKET",
+                  "capacity":2,
+                  "refillSeconds":5
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fixedWindowRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(tokenBucketRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        redisTemplate.execute((RedisCallback<Void>) connection -> {
+            connection.scriptingCommands().scriptFlush();
+            return null;
+        });
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fixedWindowRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(tokenBucketRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
     }
 
     @Test
