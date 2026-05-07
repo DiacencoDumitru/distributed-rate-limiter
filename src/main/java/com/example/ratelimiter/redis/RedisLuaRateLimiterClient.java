@@ -14,6 +14,8 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
     private final RedisKeyFactory keyFactory;
     private final DefaultRedisScript<List> fixedWindowScript;
     private final DefaultRedisScript<List> tokenBucketScript;
+    private final DefaultRedisScript<List> fixedWindowStateScript;
+    private final DefaultRedisScript<List> tokenBucketStateScript;
 
     public RedisLuaRateLimiterClient(StringRedisTemplate redisTemplate, RedisKeyFactory keyFactory, LuaScriptLoader scriptLoader) {
         this.redisTemplate = redisTemplate;
@@ -24,6 +26,12 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
         this.tokenBucketScript = new DefaultRedisScript<>();
         this.tokenBucketScript.setScriptText(scriptLoader.load("lua/token_bucket.lua"));
         this.tokenBucketScript.setResultType(List.class);
+        this.fixedWindowStateScript = new DefaultRedisScript<>();
+        this.fixedWindowStateScript.setScriptText(scriptLoader.load("lua/fixed_window_state.lua"));
+        this.fixedWindowStateScript.setResultType(List.class);
+        this.tokenBucketStateScript = new DefaultRedisScript<>();
+        this.tokenBucketStateScript.setScriptText(scriptLoader.load("lua/token_bucket_state.lua"));
+        this.tokenBucketStateScript.setResultType(List.class);
     }
 
     @Override
@@ -43,30 +51,17 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
     }
 
     @Override
-    public String getFixedWindowCurrentCount(String key) {
+    public List<String> getFixedWindowState(String key) {
         String redisKey = keyFactory.build(RateLimitStrategy.FIXED_WINDOW, key);
-        return redisTemplate.opsForValue().get(redisKey);
+        List result = redisTemplate.execute(fixedWindowStateScript, List.of(redisKey));
+        return toStringList(result, 2);
     }
 
     @Override
-    public List<String> getTokenBucketData(String key) {
+    public List<String> getTokenBucketState(String key) {
         String redisKey = keyFactory.build(RateLimitStrategy.TOKEN_BUCKET, key);
-        List<Object> result = redisTemplate.opsForHash().multiGet(redisKey, List.of("tokens", "ts"));
-        if (result == null) {
-            return List.of(null, null);
-        }
-        return result.stream()
-                .map(value -> Objects.toString(value, null))
-                .toList();
-    }
-
-    @Override
-    public long getTtlSeconds(String key) {
-        Long ttl = redisTemplate.getExpire(key);
-        if (ttl == null || ttl < 0) {
-            return 0;
-        }
-        return ttl;
+        List result = redisTemplate.execute(tokenBucketStateScript, List.of(redisKey));
+        return toStringList(result, 3);
     }
 
     private RateLimitResult toResult(List result) {
@@ -84,5 +79,14 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
             return number.longValue();
         }
         return Long.parseLong(String.valueOf(value));
+    }
+
+    private List<String> toStringList(List result, int expectedSize) {
+        if (result == null || result.size() < expectedSize) {
+            throw new IllegalStateException("Unexpected Redis Lua state result");
+        }
+        return result.stream()
+                .map(value -> Objects.toString(value, null))
+                .toList();
     }
 }

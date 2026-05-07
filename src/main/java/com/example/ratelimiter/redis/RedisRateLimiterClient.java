@@ -8,9 +8,7 @@ public interface RedisRateLimiterClient {
 
     RateLimitResult evaluateTokenBucket(String key, long capacity, long refillSeconds);
 
-    String getFixedWindowCurrentCount(String key);
+    List<String> getFixedWindowState(String key);
 
-    List<String> getTokenBucketData(String key);
-
-    long getTtlSeconds(String key);
+    List<String> getTokenBucketState(String key);
 }

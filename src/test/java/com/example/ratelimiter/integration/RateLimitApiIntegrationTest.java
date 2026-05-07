@@ -229,6 +229,62 @@ class RateLimitApiIntegrationTest {
     }
 
     @Test
+    void adminStateShouldReturnPositiveTtlForExistingKeys() throws Exception {
+        String fixedWindowCheckRequest = """
+                {
+                  "key":"admin-ttl-fixed-user",
+                  "strategy":"FIXED_WINDOW",
+                  "limit":2,
+                  "windowSeconds":15
+                }
+                """;
+        String fixedWindowStateRequest = """
+                {
+                  "key":"admin-ttl-fixed-user",
+                  "strategy":"FIXED_WINDOW"
+                }
+                """;
+        String tokenBucketCheckRequest = """
+                {
+                  "key":"admin-ttl-token-user",
+                  "strategy":"TOKEN_BUCKET",
+                  "capacity":2,
+                  "refillSeconds":15
+                }
+                """;
+        String tokenBucketStateRequest = """
+                {
+                  "key":"admin-ttl-token-user",
+                  "strategy":"TOKEN_BUCKET"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fixedWindowCheckRequest))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fixedWindowStateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exists").value(true))
+                .andExpect(jsonPath("$.ttlSeconds").value(Matchers.greaterThanOrEqualTo(1)));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(tokenBucketCheckRequest))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(tokenBucketStateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exists").value(true))
+                .andExpect(jsonPath("$.ttlSeconds").value(Matchers.greaterThanOrEqualTo(1)));
+    }
+
+    @Test
     void adminStateShouldReturnNotExistingForMissingKey() throws Exception {
         String stateRequest = """
                 {
