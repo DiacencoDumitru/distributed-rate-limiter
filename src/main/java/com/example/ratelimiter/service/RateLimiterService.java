@@ -3,9 +3,12 @@ package com.example.ratelimiter.service;
 import com.example.ratelimiter.api.AdminRateLimitStateRequest;
 import com.example.ratelimiter.api.RateLimitRequest;
 import com.example.ratelimiter.api.FixedWindowRateLimitRequest;
+import com.example.ratelimiter.api.SlidingWindowRateLimitRequest;
 import com.example.ratelimiter.api.TokenBucketRateLimitRequest;
 import com.example.ratelimiter.redis.RedisRateLimiterClient;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class RateLimiterService {
@@ -26,6 +29,11 @@ public class RateLimiterService {
                     tokenBucketRequest.key(),
                     tokenBucketRequest.capacity(),
                     tokenBucketRequest.refillSeconds()
+            );
+            case SlidingWindowRateLimitRequest slidingWindowRequest -> redisRateLimiterClient.evaluateSlidingWindow(
+                    slidingWindowRequest.key(),
+                    slidingWindowRequest.limit(),
+                    slidingWindowRequest.windowSeconds()
             );
         };
     }
@@ -56,6 +64,18 @@ public class RateLimiterService {
                         Double.parseDouble(tokensValue),
                         Double.parseDouble(lastRefillTimestampValue)
                 );
+            }
+            case SLIDING_WINDOW -> {
+                if (request.windowSeconds() == null) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "windowSeconds is required for SLIDING_WINDOW");
+                }
+                var slidingWindowState = redisRateLimiterClient.getSlidingWindowState(request.key(), request.windowSeconds());
+                String currentCountValue = slidingWindowState.get(0);
+                long ttlSeconds = Long.parseLong(slidingWindowState.get(1));
+                if (isMissingState(currentCountValue)) {
+                    yield new RateLimitStateResult(false, 0, null, null, null);
+                }
+                yield new RateLimitStateResult(true, ttlSeconds, Long.parseLong(currentCountValue), null, null);
             }
         };
     }

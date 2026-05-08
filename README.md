@@ -6,9 +6,10 @@ Distributed rate limiter service built with Spring Boot, Redis, and Lua scripts.
 
 - API endpoint: `POST /api/v1/rate-limit/check`
 - Admin API endpoint: `POST /api/v1/admin/rate-limit/state`
-- Two rate limiting strategies:
+- Three rate limiting strategies:
   - `FIXED_WINDOW`
   - `TOKEN_BUCKET`
+  - `SLIDING_WINDOW`
 - Atomic check-and-update logic using Redis Lua
 - Integration tests with Testcontainers (Redis)
 
@@ -86,6 +87,29 @@ Content-Type: application/json
 }
 ```
 
+```http
+POST /api/v1/rate-limit/check
+Content-Type: application/json
+
+{
+  "key": "user-123",
+  "strategy": "SLIDING_WINDOW",
+  "limit": 5,
+  "windowSeconds": 10
+}
+```
+
+```http
+POST /api/v1/admin/rate-limit/state
+Content-Type: application/json
+
+{
+  "key": "user-123",
+  "strategy": "SLIDING_WINDOW",
+  "windowSeconds": 10
+}
+```
+
 ## Response Example (allow)
 
 ```json
@@ -136,7 +160,23 @@ HTTP `429 Too Many Requests`
 }
 ```
 
+## Admin State Response Example (sliding window)
+
+```json
+{
+  "key": "user-123",
+  "strategy": "SLIDING_WINDOW",
+  "exists": true,
+  "ttlSeconds": 8,
+  "currentCount": 2,
+  "tokens": null,
+  "lastRefillTimestampSeconds": null
+}
+```
+
 Admin state endpoint is read-only and does not consume tokens or increment counters.
+For `SLIDING_WINDOW` the admin state request must include `windowSeconds` so the server can
+prune expired entries before reporting `currentCount`.
 
 ## Tests
 
@@ -156,6 +196,10 @@ The API now uses strategy-specific request models:
 
 - `FIXED_WINDOW` requires `limit` and `windowSeconds`.
 - `TOKEN_BUCKET` requires `capacity` and `refillSeconds`.
+- `SLIDING_WINDOW` requires `limit` and `windowSeconds`. Implemented as a sliding window log
+  on a Redis sorted set: each request is recorded with a microsecond timestamp, expired
+  entries are pruned in the same Lua call, and `retryAfterSeconds` is computed from the
+  oldest entry still in the window.
 
 At runtime, Jackson resolves the incoming request model by `strategy`.
 Then `RateLimiterService` maps each request type to a dedicated Redis client method.
