@@ -402,4 +402,218 @@ class RateLimitApiIntegrationTest {
                         .content(request))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void slidingWindowShouldRejectAfterLimitReached() throws Exception {
+        String request = """
+                {
+                  "key":"sliding-user-a",
+                  "strategy":"SLIDING_WINDOW",
+                  "limit":2,
+                  "windowSeconds":3
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true))
+                .andExpect(jsonPath("$.remaining").value(1));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true))
+                .andExpect(jsonPath("$.remaining").value(0));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.allowed").value(false))
+                .andExpect(jsonPath("$.retryAfterSeconds").value(Matchers.greaterThanOrEqualTo(1)));
+    }
+
+    @Test
+    void slidingWindowShouldAllowAgainAfterWindowSlides() throws Exception {
+        String request = """
+                {
+                  "key":"sliding-user-b",
+                  "strategy":"SLIDING_WINDOW",
+                  "limit":1,
+                  "windowSeconds":1
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.allowed").value(false));
+
+        Thread.sleep(1200);
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+    }
+
+    @Test
+    void slidingWindowShouldDropOldestEntryAsItLeavesWindow() throws Exception {
+        String request = """
+                {
+                  "key":"sliding-user-c",
+                  "strategy":"SLIDING_WINDOW",
+                  "limit":2,
+                  "windowSeconds":2
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        Thread.sleep(1100);
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.allowed").value(false));
+
+        Thread.sleep(1000);
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+    }
+
+    @Test
+    void adminStateShouldReturnSlidingWindowStateWithoutMutatingCounter() throws Exception {
+        String checkRequest = """
+                {
+                  "key":"admin-sliding-user",
+                  "strategy":"SLIDING_WINDOW",
+                  "limit":3,
+                  "windowSeconds":10
+                }
+                """;
+        String stateRequest = """
+                {
+                  "key":"admin-sliding-user",
+                  "strategy":"SLIDING_WINDOW",
+                  "windowSeconds":10
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.remaining").value(2));
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.strategy").value("SLIDING_WINDOW"))
+                .andExpect(jsonPath("$.exists").value(true))
+                .andExpect(jsonPath("$.currentCount").value(1))
+                .andExpect(jsonPath("$.tokens").doesNotExist())
+                .andExpect(jsonPath("$.lastRefillTimestampSeconds").doesNotExist());
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.currentCount").value(1));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.remaining").value(1));
+    }
+
+    @Test
+    void adminStateShouldReturnPositiveTtlForSlidingWindow() throws Exception {
+        String checkRequest = """
+                {
+                  "key":"admin-ttl-sliding-user",
+                  "strategy":"SLIDING_WINDOW",
+                  "limit":2,
+                  "windowSeconds":15
+                }
+                """;
+        String stateRequest = """
+                {
+                  "key":"admin-ttl-sliding-user",
+                  "strategy":"SLIDING_WINDOW",
+                  "windowSeconds":15
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exists").value(true))
+                .andExpect(jsonPath("$.ttlSeconds").value(Matchers.greaterThanOrEqualTo(1)));
+    }
+
+    @Test
+    void slidingWindowShouldReturnBadRequestWhenRequiredFieldIsMissing() throws Exception {
+        String request = """
+                {
+                  "key":"user-invalid-sliding",
+                  "strategy":"SLIDING_WINDOW",
+                  "limit":2
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void adminStateShouldReturnBadRequestWhenSlidingWindowSecondsMissing() throws Exception {
+        String stateRequest = """
+                {
+                  "key":"admin-sliding-missing-window",
+                  "strategy":"SLIDING_WINDOW"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isBadRequest());
+    }
 }

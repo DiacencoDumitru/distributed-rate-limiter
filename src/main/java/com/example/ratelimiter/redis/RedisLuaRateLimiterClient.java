@@ -12,16 +12,20 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
     private final RedisLuaScriptExecutor scriptExecutor;
     private final String fixedWindowScript;
     private final String tokenBucketScript;
+    private final String slidingWindowScript;
     private final String fixedWindowStateScript;
     private final String tokenBucketStateScript;
+    private final String slidingWindowStateScript;
 
     public RedisLuaRateLimiterClient(RedisKeyFactory keyFactory, LuaScriptLoader scriptLoader, RedisLuaScriptExecutor scriptExecutor) {
         this.keyFactory = keyFactory;
         this.scriptExecutor = scriptExecutor;
         this.fixedWindowScript = scriptLoader.load("lua/fixed_window.lua");
         this.tokenBucketScript = scriptLoader.load("lua/token_bucket.lua");
+        this.slidingWindowScript = scriptLoader.load("lua/sliding_window.lua");
         this.fixedWindowStateScript = scriptLoader.load("lua/fixed_window_state.lua");
         this.tokenBucketStateScript = scriptLoader.load("lua/token_bucket_state.lua");
+        this.slidingWindowStateScript = scriptLoader.load("lua/sliding_window_state.lua");
     }
 
     @Override
@@ -49,6 +53,18 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
     }
 
     @Override
+    public RateLimitResult evaluateSlidingWindow(String key, long limit, long windowSeconds) {
+        String redisKey = keyFactory.build(RateLimitStrategy.SLIDING_WINDOW, key);
+        List result = scriptExecutor.execute(
+                "sliding_window",
+                slidingWindowScript,
+                List.of(redisKey),
+                String.valueOf(limit),
+                String.valueOf(windowSeconds));
+        return toResult(result);
+    }
+
+    @Override
     public List<String> getFixedWindowState(String key) {
         String redisKey = keyFactory.build(RateLimitStrategy.FIXED_WINDOW, key);
         List result = scriptExecutor.execute("fixed_window_state", fixedWindowStateScript, List.of(redisKey));
@@ -60,6 +76,17 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
         String redisKey = keyFactory.build(RateLimitStrategy.TOKEN_BUCKET, key);
         List result = scriptExecutor.execute("token_bucket_state", tokenBucketStateScript, List.of(redisKey));
         return toStringList(result, 3);
+    }
+
+    @Override
+    public List<String> getSlidingWindowState(String key, long windowSeconds) {
+        String redisKey = keyFactory.build(RateLimitStrategy.SLIDING_WINDOW, key);
+        List result = scriptExecutor.execute(
+                "sliding_window_state",
+                slidingWindowStateScript,
+                List.of(redisKey),
+                String.valueOf(windowSeconds));
+        return toStringList(result, 2);
     }
 
     private RateLimitResult toResult(List result) {
