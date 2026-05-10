@@ -1,6 +1,8 @@
 package com.example.ratelimiter.integration;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -36,6 +38,29 @@ class RateLimitApiIntegrationTest {
     static void redisProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
+    }
+
+    @Test
+    void actuatorHealthShouldReturnUp() throws Exception {
+        mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    @Test
+    void prometheusEndpointShouldExposeMetrics() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(Matchers.containsString("jvm_info")));
+    }
+
+    @Test
+    void openApiEndpointShouldDescribeRateLimitApi() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.openapi").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/rate-limit/check']").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/rate-limit/state']").exists());
     }
 
     @Test
@@ -370,7 +395,12 @@ class RateLimitApiIntegrationTest {
         mockMvc.perform(post("/api/v1/rate-limit/check")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.path").value("/api/v1/rate-limit/check"))
+                .andExpect(jsonPath("$.fieldErrors.limit").exists());
     }
 
     @Test
