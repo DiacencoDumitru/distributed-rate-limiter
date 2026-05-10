@@ -19,7 +19,11 @@ Distributed rate limiter service built with Spring Boot, Redis, and Lua scripts.
 - Spring Boot 3
 - Spring Data Redis
 - Redis Lua scripts
+- Spring Boot Actuator
+- Micrometer Prometheus
+- OpenAPI UI
 - JUnit 5 + Testcontainers
+- Docker Compose
 
 ## Run Locally
 
@@ -32,14 +36,16 @@ docker run --name drl-redis -p 6379:6379 -d redis:7.4-alpine
 2. Run the application:
 
 ```bash
-./mvnw spring-boot:run
-```
-
-If `mvnw` is not available:
-
-```bash
 mvn spring-boot:run
 ```
+
+## Run With Docker Compose
+
+```bash
+docker compose up --build
+```
+
+The application starts on `http://localhost:8080` and Redis starts on `localhost:6379`.
 
 ## Request Examples
 
@@ -178,13 +184,41 @@ Admin state endpoint is read-only and does not consume tokens or increment count
 For `SLIDING_WINDOW` the admin state request must include `windowSeconds` so the server can
 prune expired entries before reporting `currentCount`.
 
-## Tests
+## Observability
 
-```bash
-./mvnw test
+- Health: `GET /actuator/health`
+- Prometheus metrics: `GET /actuator/prometheus`
+- OpenAPI JSON: `GET /v3/api-docs`
+- Swagger UI: `GET /swagger-ui`
+
+## Configuration
+
+| Environment variable | Default |
+| --- | --- |
+| `REDIS_HOST` | `localhost` |
+| `REDIS_PORT` | `6379` |
+| `REDIS_TIMEOUT` | `2s` |
+| `REDIS_POOL_MAX_ACTIVE` | `16` |
+| `REDIS_POOL_MAX_IDLE` | `8` |
+| `REDIS_POOL_MIN_IDLE` | `0` |
+| `REDIS_POOL_MAX_WAIT` | `2s` |
+
+## Error Response Example
+
+```json
+{
+  "timestamp": "2026-05-10T08:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Validation failed",
+  "path": "/api/v1/rate-limit/check",
+  "fieldErrors": {
+    "limit": "must not be null"
+  }
+}
 ```
 
-or
+## Tests
 
 ```bash
 mvn test
