@@ -7,6 +7,8 @@ import com.example.ratelimiter.api.SlidingWindowRateLimitRequest;
 import com.example.ratelimiter.api.TokenBucketRateLimitRequest;
 import com.example.ratelimiter.api.AdminRateLimitResetRequest;
 import com.example.ratelimiter.redis.RedisRateLimiterClient;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -14,13 +16,17 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class RateLimiterService {
     private final RedisRateLimiterClient redisRateLimiterClient;
+    private final MeterRegistry meterRegistry;
 
-    public RateLimiterService(RedisRateLimiterClient redisRateLimiterClient) {
+    public RateLimiterService(RedisRateLimiterClient redisRateLimiterClient, MeterRegistry meterRegistry) {
         this.redisRateLimiterClient = redisRateLimiterClient;
+        this.meterRegistry = meterRegistry;
     }
 
     public RateLimitResult check(RateLimitRequest request) {
-        return switch (request) {
+        String strategy = resolveStrategy(request);
+        Timer.Sample sample = Timer.start(meterRegistry);
+        RateLimitResult result = switch (request) {
             case FixedWindowRateLimitRequest fixedWindowRequest -> redisRateLimiterClient.evaluateFixedWindow(
                     fixedWindowRequest.key(),
                     fixedWindowRequest.limit(),
@@ -37,6 +43,17 @@ public class RateLimiterService {
                     slidingWindowRequest.windowSeconds()
             );
         };
+        String outcome = result.allowed() ? "allowed" : "rejected";
+        meterRegistry.counter(
+                "ratelimiter.requests.total",
+                "strategy", strategy,
+                "outcome", outcome
+        ).increment();
+        sample.stop(Timer.builder("ratelimiter.request.duration")
+                .tag("strategy", strategy)
+                .tag("outcome", outcome)
+                .register(meterRegistry));
+        return result;
     }
 
     public RateLimitStateResult getState(AdminRateLimitStateRequest request) {
@@ -87,5 +104,13 @@ public class RateLimiterService {
 
     private boolean isMissingState(String value) {
         return value == null || "-1".equals(value);
+    }
+
+    private String resolveStrategy(RateLimitRequest request) {
+        return switch (request) {
+            case FixedWindowRateLimitRequest ignored -> "fixed_window";
+            case TokenBucketRateLimitRequest ignored -> "token_bucket";
+            case SlidingWindowRateLimitRequest ignored -> "sliding_window";
+        };
     }
 }
