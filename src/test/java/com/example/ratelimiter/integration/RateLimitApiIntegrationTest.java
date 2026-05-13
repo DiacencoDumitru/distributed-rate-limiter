@@ -50,9 +50,32 @@ class RateLimitApiIntegrationTest {
 
     @Test
     void prometheusEndpointShouldExposeMetrics() throws Exception {
+        String request = """
+                {
+                  "key":"metrics-user",
+                  "strategy":"FIXED_WINDOW",
+                  "limit":1,
+                  "windowSeconds":5
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isTooManyRequests());
+
         mockMvc.perform(get("/actuator/prometheus"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(Matchers.containsString("jvm_info")));
+                .andExpect(content().string(Matchers.containsString("jvm_info")))
+                .andExpect(content().string(Matchers.containsString("ratelimiter_requests_total")))
+                .andExpect(content().string(Matchers.containsString("strategy=\"fixed_window\"")))
+                .andExpect(content().string(Matchers.containsString("outcome=\"allowed\"")))
+                .andExpect(content().string(Matchers.containsString("outcome=\"rejected\"")));
     }
 
     @Test
