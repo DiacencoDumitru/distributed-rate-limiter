@@ -4,16 +4,17 @@ import com.example.ratelimiter.api.AdminRateLimitResetRequest;
 import com.example.ratelimiter.api.AdminRateLimitStateRequest;
 import com.example.ratelimiter.api.FixedWindowRateLimitRequest;
 import com.example.ratelimiter.api.RateLimitRequest;
-import com.example.ratelimiter.api.RateLimitStrategy;
 import com.example.ratelimiter.api.SlidingWindowRateLimitRequest;
 import com.example.ratelimiter.api.TokenBucketRateLimitRequest;
 import com.example.ratelimiter.config.RateLimitPoliciesProperties;
 import com.example.ratelimiter.config.RateLimitPoliciesProperties.PolicyDefinition;
+import com.example.ratelimiter.config.RedisFailMode;
 import com.example.ratelimiter.redis.RedisRateLimiterClient;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.util.ArrayList;
 import java.util.List;
-import io.micrometer.core.instrument.Timer;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -38,7 +39,95 @@ public class RateLimiterService {
         String strategy = resolveStrategy(resolved);
         String scope = redisScope(resolved);
         Timer.Sample sample = Timer.start(meterRegistry);
-        RateLimitResult result = switch (resolved) {
+        try {
+            RateLimitResult result = evaluateRedis(resolved, scope);
+            String outcome = result.allowed() ? "allowed" : "rejected";
+            meterRegistry.counter(
+                    "ratelimiter.requests.total",
+                    "strategy", strategy,
+                    "outcome", outcome
+            ).increment();
+            sample.stop(Timer.builder("ratelimiter.request.duration")
+                    .tag("strategy", strategy)
+                    .tag("outcome", outcome)
+                    .register(meterRegistry));
+            return new RateLimitCheckOutcome(result, limitOf(resolved));
+        } catch (DataAccessException ex) {
+            return handleRedisFailureOnCheck(resolved, strategy, sample);
+        }
+    }
+
+    public List<RateLimitCheckOutcome> checkBatch(List<RateLimitRequest> requests) {
+        List<RateLimitCheckOutcome> outcomes = new ArrayList<>(requests.size());
+        for (RateLimitRequest request : requests) {
+            outcomes.add(check(request));
+        }
+        return outcomes;
+    }
+
+    public RateLimitStateResult getState(AdminRateLimitStateRequest request) {
+        String scope = emptyToNull(request.scope());
+        try {
+            return switch (request.strategy()) {
+                case FIXED_WINDOW -> {
+                    var fixedWindowState = redisRateLimiterClient.getFixedWindowState(request.key(), scope);
+                    String currentCountValue = fixedWindowState.get(0);
+                    long ttlSeconds = Long.parseLong(fixedWindowState.get(1));
+                    if (isMissingState(currentCountValue)) {
+                        yield new RateLimitStateResult(false, 0, null, null, null);
+                    }
+                    yield new RateLimitStateResult(true, ttlSeconds, Long.parseLong(currentCountValue), null, null);
+                }
+                case TOKEN_BUCKET -> {
+                    var tokenBucketState = redisRateLimiterClient.getTokenBucketState(request.key(), scope);
+                    String tokensValue = tokenBucketState.get(0);
+                    String lastRefillTimestampValue = tokenBucketState.get(1);
+                    long ttlSeconds = Long.parseLong(tokenBucketState.get(2));
+                    if (isMissingState(tokensValue) || isMissingState(lastRefillTimestampValue)) {
+                        yield new RateLimitStateResult(false, 0, null, null, null);
+                    }
+                    yield new RateLimitStateResult(
+                            true,
+                            ttlSeconds,
+                            null,
+                            Double.parseDouble(tokensValue),
+                            Double.parseDouble(lastRefillTimestampValue)
+                    );
+                }
+                case SLIDING_WINDOW -> {
+                    if (request.windowSeconds() == null) {
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "windowSeconds is required for SLIDING_WINDOW");
+                    }
+                    var slidingWindowState = redisRateLimiterClient.getSlidingWindowState(request.key(), request.windowSeconds(), scope);
+                    String currentCountValue = slidingWindowState.get(0);
+                    long ttlSeconds = Long.parseLong(slidingWindowState.get(1));
+                    if (isMissingState(currentCountValue)) {
+                        yield new RateLimitStateResult(false, 0, null, null, null);
+                    }
+                    yield new RateLimitStateResult(true, ttlSeconds, Long.parseLong(currentCountValue), null, null);
+                }
+            };
+        } catch (DataAccessException ex) {
+            if (policiesProperties.getRedisFailMode() == RedisFailMode.FAIL_OPEN) {
+                return new RateLimitStateResult(false, 0, null, null, null);
+            }
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "redis_unavailable");
+        }
+    }
+
+    public boolean resetState(AdminRateLimitResetRequest request) {
+        try {
+            return redisRateLimiterClient.resetState(request.strategy(), request.key(), emptyToNull(request.scope()));
+        } catch (DataAccessException ex) {
+            if (policiesProperties.getRedisFailMode() == RedisFailMode.FAIL_OPEN) {
+                return false;
+            }
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "redis_unavailable");
+        }
+    }
+
+    private RateLimitResult evaluateRedis(RateLimitRequest resolved, String scope) {
+        return switch (resolved) {
             case FixedWindowRateLimitRequest fixedWindowRequest -> redisRateLimiterClient.evaluateFixedWindow(
                     fixedWindowRequest.key(),
                     fixedWindowRequest.limit(),
@@ -58,7 +147,25 @@ public class RateLimiterService {
                     scope
             );
         };
-        String outcome = result.allowed() ? "allowed" : "rejected";
+    }
+
+    private RateLimitCheckOutcome handleRedisFailureOnCheck(RateLimitRequest resolved, String strategy, Timer.Sample sample) {
+        if (policiesProperties.getRedisFailMode() == RedisFailMode.FAIL_OPEN) {
+            String outcome = "redis_fail_open";
+            long lim = limitOf(resolved);
+            RateLimitResult result = new RateLimitResult(true, lim, 0L);
+            meterRegistry.counter(
+                    "ratelimiter.requests.total",
+                    "strategy", strategy,
+                    "outcome", outcome
+            ).increment();
+            sample.stop(Timer.builder("ratelimiter.request.duration")
+                    .tag("strategy", strategy)
+                    .tag("outcome", outcome)
+                    .register(meterRegistry));
+            return new RateLimitCheckOutcome(result, lim);
+        }
+        String outcome = "redis_unavailable";
         meterRegistry.counter(
                 "ratelimiter.requests.total",
                 "strategy", strategy,
@@ -68,62 +175,7 @@ public class RateLimiterService {
                 .tag("strategy", strategy)
                 .tag("outcome", outcome)
                 .register(meterRegistry));
-        return new RateLimitCheckOutcome(result, limitOf(resolved));
-    }
-
-    public List<RateLimitCheckOutcome> checkBatch(List<RateLimitRequest> requests) {
-        List<RateLimitCheckOutcome> outcomes = new ArrayList<>(requests.size());
-        for (RateLimitRequest request : requests) {
-            outcomes.add(check(request));
-        }
-        return outcomes;
-    }
-
-    public RateLimitStateResult getState(AdminRateLimitStateRequest request) {
-        String scope = emptyToNull(request.scope());
-        return switch (request.strategy()) {
-            case FIXED_WINDOW -> {
-                var fixedWindowState = redisRateLimiterClient.getFixedWindowState(request.key(), scope);
-                String currentCountValue = fixedWindowState.get(0);
-                long ttlSeconds = Long.parseLong(fixedWindowState.get(1));
-                if (isMissingState(currentCountValue)) {
-                    yield new RateLimitStateResult(false, 0, null, null, null);
-                }
-                yield new RateLimitStateResult(true, ttlSeconds, Long.parseLong(currentCountValue), null, null);
-            }
-            case TOKEN_BUCKET -> {
-                var tokenBucketState = redisRateLimiterClient.getTokenBucketState(request.key(), scope);
-                String tokensValue = tokenBucketState.get(0);
-                String lastRefillTimestampValue = tokenBucketState.get(1);
-                long ttlSeconds = Long.parseLong(tokenBucketState.get(2));
-                if (isMissingState(tokensValue) || isMissingState(lastRefillTimestampValue)) {
-                    yield new RateLimitStateResult(false, 0, null, null, null);
-                }
-                yield new RateLimitStateResult(
-                        true,
-                        ttlSeconds,
-                        null,
-                        Double.parseDouble(tokensValue),
-                        Double.parseDouble(lastRefillTimestampValue)
-                );
-            }
-            case SLIDING_WINDOW -> {
-                if (request.windowSeconds() == null) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "windowSeconds is required for SLIDING_WINDOW");
-                }
-                var slidingWindowState = redisRateLimiterClient.getSlidingWindowState(request.key(), request.windowSeconds(), scope);
-                String currentCountValue = slidingWindowState.get(0);
-                long ttlSeconds = Long.parseLong(slidingWindowState.get(1));
-                if (isMissingState(currentCountValue)) {
-                    yield new RateLimitStateResult(false, 0, null, null, null);
-                }
-                yield new RateLimitStateResult(true, ttlSeconds, Long.parseLong(currentCountValue), null, null);
-            }
-        };
-    }
-
-    public boolean resetState(AdminRateLimitResetRequest request) {
-        return redisRateLimiterClient.resetState(request.strategy(), request.key(), emptyToNull(request.scope()));
+        throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "redis_unavailable");
     }
 
     private RateLimitRequest resolvePolicies(RateLimitRequest request) {

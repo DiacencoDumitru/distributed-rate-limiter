@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class RateLimitPoliciesProperties {
 
     private Map<String, PolicyDefinition> policies = new LinkedHashMap<>();
+    private RedisFailMode redisFailMode = RedisFailMode.FAIL_CLOSED;
 
     public Map<String, PolicyDefinition> getPolicies() {
         return policies;
@@ -16,6 +17,14 @@ public class RateLimitPoliciesProperties {
 
     public void setPolicies(Map<String, PolicyDefinition> policies) {
         this.policies = policies != null ? policies : new LinkedHashMap<>();
+    }
+
+    public RedisFailMode getRedisFailMode() {
+        return redisFailMode;
+    }
+
+    public void setRedisFailMode(RedisFailMode redisFailMode) {
+        this.redisFailMode = redisFailMode != null ? redisFailMode : RedisFailMode.FAIL_CLOSED;
     }
 
     public static class PolicyDefinition {
