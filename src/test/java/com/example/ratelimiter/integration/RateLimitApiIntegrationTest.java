@@ -60,7 +60,8 @@ class RateLimitApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.openapi").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/rate-limit/check']").exists())
-                .andExpect(jsonPath("$.paths['/api/v1/admin/rate-limit/state']").exists());
+                .andExpect(jsonPath("$.paths['/api/v1/admin/rate-limit/state']").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/rate-limit/reset']").exists());
     }
 
     @Test
@@ -380,6 +381,60 @@ class RateLimitApiIntegrationTest {
                 .andExpect(jsonPath("$.currentCount").doesNotExist())
                 .andExpect(jsonPath("$.tokens").doesNotExist())
                 .andExpect(jsonPath("$.lastRefillTimestampSeconds").doesNotExist());
+    }
+
+    @Test
+    void adminResetShouldDeleteStateAndAllowFreshChecks() throws Exception {
+        String checkRequest = """
+                {
+                  "key":"admin-reset-user",
+                  "strategy":"FIXED_WINDOW",
+                  "limit":1,
+                  "windowSeconds":20
+                }
+                """;
+        String stateRequest = """
+                {
+                  "key":"admin-reset-user",
+                  "strategy":"FIXED_WINDOW"
+                }
+                """;
+        String resetRequest = """
+                {
+                  "key":"admin-reset-user",
+                  "strategy":"FIXED_WINDOW"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exists").value(true));
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(resetRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deleted").value(true));
+
+        mockMvc.perform(post("/api/v1/admin/rate-limit/state")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(stateRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exists").value(false));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkRequest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.example.ratelimiter.api.RateLimitRequest;
 import com.example.ratelimiter.api.FixedWindowRateLimitRequest;
 import com.example.ratelimiter.api.SlidingWindowRateLimitRequest;
 import com.example.ratelimiter.api.TokenBucketRateLimitRequest;
+import com.example.ratelimiter.api.AdminRateLimitResetRequest;
 import com.example.ratelimiter.redis.RedisRateLimiterClient;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -78,6 +79,10 @@ public class RateLimiterService {
                 yield new RateLimitStateResult(true, ttlSeconds, Long.parseLong(currentCountValue), null, null);
             }
         };
+    }
+
+    public boolean resetState(AdminRateLimitResetRequest request) {
+        return redisRateLimiterClient.resetState(request.strategy(), request.key());
     }
 
     private boolean isMissingState(String value) {

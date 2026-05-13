@@ -32,4 +32,10 @@ public class AdminRateLimitController {
         );
         return ResponseEntity.ok(response);
     }
+
+    @PostMapping("/reset")
+    public ResponseEntity<AdminRateLimitResetResponse> reset(@Valid @RequestBody AdminRateLimitResetRequest request) {
+        boolean deleted = rateLimiterService.resetState(request);
+        return ResponseEntity.ok(new AdminRateLimitResetResponse(request.key(), request.strategy(), deleted));
+    }
 }
