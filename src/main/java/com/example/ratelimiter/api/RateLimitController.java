@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/v1/rate-limit")
 public class RateLimitController {
@@ -36,5 +38,18 @@ public class RateLimitController {
                         HttpHeaders.RETRY_AFTER,
                         outcome.result().allowed() ? "0" : String.valueOf(Math.max(1, outcome.result().retryAfterSeconds())))
                 .body(response);
+    }
+
+    @PostMapping("/check-batch")
+    public ResponseEntity<List<RateLimitResponse>> checkBatch(@Valid @RequestBody RateLimitBatchRequest batch) {
+        List<RateLimitCheckOutcome> outcomes = rateLimiterService.checkBatch(batch.requests());
+        List<RateLimitResponse> body = outcomes.stream()
+                .map(outcome -> new RateLimitResponse(
+                        outcome.result().allowed(),
+                        outcome.result().remaining(),
+                        outcome.result().retryAfterSeconds()
+                ))
+                .toList();
+        return ResponseEntity.ok(body);
     }
 }

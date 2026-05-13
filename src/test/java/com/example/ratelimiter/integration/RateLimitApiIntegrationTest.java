@@ -87,6 +87,7 @@ class RateLimitApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.openapi").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/rate-limit/check']").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/rate-limit/check-batch']").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/admin/rate-limit/state']").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/admin/rate-limit/reset']").exists());
     }
@@ -781,6 +782,35 @@ class RateLimitApiIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(stateRequest))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void checkBatchShouldEvaluateRequestsInOrder() throws Exception {
+        String body = """
+                {
+                  "requests":[
+                    {
+                      "key":"batch-same-key",
+                      "strategy":"FIXED_WINDOW",
+                      "limit":1,
+                      "windowSeconds":60
+                    },
+                    {
+                      "key":"batch-same-key",
+                      "strategy":"FIXED_WINDOW",
+                      "limit":1,
+                      "windowSeconds":60
+                    }
+                  ]
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].allowed").value(true))
+                .andExpect(jsonPath("$[1].allowed").value(false));
     }
 
     @Test

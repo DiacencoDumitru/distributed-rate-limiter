@@ -11,6 +11,8 @@ import com.example.ratelimiter.config.RateLimitPoliciesProperties;
 import com.example.ratelimiter.config.RateLimitPoliciesProperties.PolicyDefinition;
 import com.example.ratelimiter.redis.RedisRateLimiterClient;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.util.ArrayList;
+import java.util.List;
 import io.micrometer.core.instrument.Timer;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -67,6 +69,14 @@ public class RateLimiterService {
                 .tag("outcome", outcome)
                 .register(meterRegistry));
         return new RateLimitCheckOutcome(result, limitOf(resolved));
+    }
+
+    public List<RateLimitCheckOutcome> checkBatch(List<RateLimitRequest> requests) {
+        List<RateLimitCheckOutcome> outcomes = new ArrayList<>(requests.size());
+        for (RateLimitRequest request : requests) {
+            outcomes.add(check(request));
+        }
+        return outcomes;
     }
 
     public RateLimitStateResult getState(AdminRateLimitStateRequest request) {
