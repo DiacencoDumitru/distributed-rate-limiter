@@ -3,6 +3,7 @@ package com.example.ratelimiter.integration;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -80,7 +81,10 @@ class RateLimitApiIntegrationTest {
                         .content(request))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.allowed").value(true))
-                .andExpect(jsonPath("$.remaining").value(1));
+                .andExpect(jsonPath("$.remaining").value(1))
+                .andExpect(header().string("X-RateLimit-Limit", "2"))
+                .andExpect(header().string("X-RateLimit-Remaining", "1"))
+                .andExpect(header().string("Retry-After", "0"));
 
         mockMvc.perform(post("/api/v1/rate-limit/check")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -94,7 +98,10 @@ class RateLimitApiIntegrationTest {
                         .content(request))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.allowed").value(false))
-                .andExpect(jsonPath("$.retryAfterSeconds").value(Matchers.greaterThanOrEqualTo(1)));
+                .andExpect(jsonPath("$.retryAfterSeconds").value(Matchers.greaterThanOrEqualTo(1)))
+                .andExpect(header().string("X-RateLimit-Limit", "2"))
+                .andExpect(header().string("X-RateLimit-Remaining", "0"))
+                .andExpect(header().string("Retry-After", Matchers.not("0")));
     }
 
     @Test
