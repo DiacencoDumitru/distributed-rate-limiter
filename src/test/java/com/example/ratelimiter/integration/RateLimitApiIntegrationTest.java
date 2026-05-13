@@ -782,4 +782,50 @@ class RateLimitApiIntegrationTest {
                         .content(stateRequest))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void fixedWindowShouldIsolateCountersPerScope() throws Exception {
+        String scopeA = """
+                {
+                  "key":"shared-user",
+                  "strategy":"FIXED_WINDOW",
+                  "scope":"tenant-a",
+                  "limit":1,
+                  "windowSeconds":30
+                }
+                """;
+        String scopeB = """
+                {
+                  "key":"shared-user",
+                  "strategy":"FIXED_WINDOW",
+                  "scope":"tenant-b",
+                  "limit":2,
+                  "windowSeconds":30
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(scopeA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(scopeB))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(scopeA))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.allowed").value(false));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(scopeB))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+    }
 }

@@ -17,4 +17,6 @@ public sealed interface RateLimitRequest permits FixedWindowRateLimitRequest, To
 
     @NotNull
     RateLimitStrategy strategy();
+
+    String scope();
 }

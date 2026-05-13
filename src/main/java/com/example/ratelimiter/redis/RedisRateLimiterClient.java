@@ -5,17 +5,17 @@ import java.util.List;
 import com.example.ratelimiter.api.RateLimitStrategy;
 
 public interface RedisRateLimiterClient {
-    RateLimitResult evaluateFixedWindow(String key, long limit, long windowSeconds);
+    RateLimitResult evaluateFixedWindow(String key, long limit, long windowSeconds, String scope);
 
-    RateLimitResult evaluateTokenBucket(String key, long capacity, long refillSeconds);
+    RateLimitResult evaluateTokenBucket(String key, long capacity, long refillSeconds, String scope);
 
-    RateLimitResult evaluateSlidingWindow(String key, long limit, long windowSeconds);
+    RateLimitResult evaluateSlidingWindow(String key, long limit, long windowSeconds, String scope);
 
-    List<String> getFixedWindowState(String key);
+    List<String> getFixedWindowState(String key, String scope);
 
-    List<String> getTokenBucketState(String key);
+    List<String> getTokenBucketState(String key, String scope);
 
-    List<String> getSlidingWindowState(String key, long windowSeconds);
+    List<String> getSlidingWindowState(String key, long windowSeconds, String scope);
 
-    boolean resetState(RateLimitStrategy strategy, String key);
+    boolean resetState(RateLimitStrategy strategy, String key, String scope);
 }

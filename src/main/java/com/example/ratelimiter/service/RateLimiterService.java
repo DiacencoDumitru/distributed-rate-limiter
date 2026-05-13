@@ -34,22 +34,26 @@ public class RateLimiterService {
     public RateLimitCheckOutcome check(RateLimitRequest request) {
         RateLimitRequest resolved = resolvePolicies(request);
         String strategy = resolveStrategy(resolved);
+        String scope = redisScope(resolved);
         Timer.Sample sample = Timer.start(meterRegistry);
         RateLimitResult result = switch (resolved) {
             case FixedWindowRateLimitRequest fixedWindowRequest -> redisRateLimiterClient.evaluateFixedWindow(
                     fixedWindowRequest.key(),
                     fixedWindowRequest.limit(),
-                    fixedWindowRequest.windowSeconds()
+                    fixedWindowRequest.windowSeconds(),
+                    scope
             );
             case TokenBucketRateLimitRequest tokenBucketRequest -> redisRateLimiterClient.evaluateTokenBucket(
                     tokenBucketRequest.key(),
                     tokenBucketRequest.capacity(),
-                    tokenBucketRequest.refillSeconds()
+                    tokenBucketRequest.refillSeconds(),
+                    scope
             );
             case SlidingWindowRateLimitRequest slidingWindowRequest -> redisRateLimiterClient.evaluateSlidingWindow(
                     slidingWindowRequest.key(),
                     slidingWindowRequest.limit(),
-                    slidingWindowRequest.windowSeconds()
+                    slidingWindowRequest.windowSeconds(),
+                    scope
             );
         };
         String outcome = result.allowed() ? "allowed" : "rejected";
@@ -66,9 +70,10 @@ public class RateLimiterService {
     }
 
     public RateLimitStateResult getState(AdminRateLimitStateRequest request) {
+        String scope = emptyToNull(request.scope());
         return switch (request.strategy()) {
             case FIXED_WINDOW -> {
-                var fixedWindowState = redisRateLimiterClient.getFixedWindowState(request.key());
+                var fixedWindowState = redisRateLimiterClient.getFixedWindowState(request.key(), scope);
                 String currentCountValue = fixedWindowState.get(0);
                 long ttlSeconds = Long.parseLong(fixedWindowState.get(1));
                 if (isMissingState(currentCountValue)) {
@@ -77,7 +82,7 @@ public class RateLimiterService {
                 yield new RateLimitStateResult(true, ttlSeconds, Long.parseLong(currentCountValue), null, null);
             }
             case TOKEN_BUCKET -> {
-                var tokenBucketState = redisRateLimiterClient.getTokenBucketState(request.key());
+                var tokenBucketState = redisRateLimiterClient.getTokenBucketState(request.key(), scope);
                 String tokensValue = tokenBucketState.get(0);
                 String lastRefillTimestampValue = tokenBucketState.get(1);
                 long ttlSeconds = Long.parseLong(tokenBucketState.get(2));
@@ -96,7 +101,7 @@ public class RateLimiterService {
                 if (request.windowSeconds() == null) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "windowSeconds is required for SLIDING_WINDOW");
                 }
-                var slidingWindowState = redisRateLimiterClient.getSlidingWindowState(request.key(), request.windowSeconds());
+                var slidingWindowState = redisRateLimiterClient.getSlidingWindowState(request.key(), request.windowSeconds(), scope);
                 String currentCountValue = slidingWindowState.get(0);
                 long ttlSeconds = Long.parseLong(slidingWindowState.get(1));
                 if (isMissingState(currentCountValue)) {
@@ -108,7 +113,7 @@ public class RateLimiterService {
     }
 
     public boolean resetState(AdminRateLimitResetRequest request) {
-        return redisRateLimiterClient.resetState(request.strategy(), request.key());
+        return redisRateLimiterClient.resetState(request.strategy(), request.key(), emptyToNull(request.scope()));
     }
 
     private RateLimitRequest resolvePolicies(RateLimitRequest request) {
@@ -132,18 +137,26 @@ public class RateLimiterService {
             case FixedWindowRateLimitRequest r -> {
                 long limit = requirePositive(firstNonNull(r.limit(), def.getLimit()), "limit");
                 long windowSeconds = requirePositive(firstNonNull(r.windowSeconds(), def.getWindowSeconds()), "windowSeconds");
-                yield new FixedWindowRateLimitRequest(r.key(), r.strategy(), r.policyId(), limit, windowSeconds);
+                yield new FixedWindowRateLimitRequest(r.key(), r.strategy(), r.policyId(), r.scope(), limit, windowSeconds);
             }
             case TokenBucketRateLimitRequest r -> {
                 long capacity = requirePositive(firstNonNull(r.capacity(), def.getCapacity()), "capacity");
                 long refillSeconds = requirePositive(firstNonNull(r.refillSeconds(), def.getRefillSeconds()), "refillSeconds");
-                yield new TokenBucketRateLimitRequest(r.key(), r.strategy(), r.policyId(), capacity, refillSeconds);
+                yield new TokenBucketRateLimitRequest(r.key(), r.strategy(), r.policyId(), r.scope(), capacity, refillSeconds);
             }
             case SlidingWindowRateLimitRequest r -> {
                 long limit = requirePositive(firstNonNull(r.limit(), def.getLimit()), "limit");
                 long windowSeconds = requirePositive(firstNonNull(r.windowSeconds(), def.getWindowSeconds()), "windowSeconds");
-                yield new SlidingWindowRateLimitRequest(r.key(), r.strategy(), r.policyId(), limit, windowSeconds);
+                yield new SlidingWindowRateLimitRequest(r.key(), r.strategy(), r.policyId(), r.scope(), limit, windowSeconds);
             }
+        };
+    }
+
+    private static String redisScope(RateLimitRequest request) {
+        return switch (request) {
+            case FixedWindowRateLimitRequest r -> emptyToNull(r.scope());
+            case TokenBucketRateLimitRequest r -> emptyToNull(r.scope());
+            case SlidingWindowRateLimitRequest r -> emptyToNull(r.scope());
         };
     }
 
