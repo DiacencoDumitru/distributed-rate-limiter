@@ -89,6 +89,16 @@ public class RedisLuaRateLimiterClient implements RedisRateLimiterClient {
         return toStringList(result, 2);
     }
 
+    @Override
+    public boolean resetState(RateLimitStrategy strategy, String key) {
+        String redisKey = keyFactory.build(strategy, key);
+        List result = scriptExecutor.execute(
+                "reset_state",
+                "return {redis.call('DEL', KEYS[1])}",
+                List.of(redisKey));
+        return parseLong(result.getFirst()) > 0;
+    }
+
     private RateLimitResult toResult(List result) {
         if (result == null || result.size() < 3) {
             throw new IllegalStateException("Unexpected Redis Lua result");
