@@ -34,4 +34,5 @@ springdoc:
     path: /swagger-ui
 
 rate-limit:
+  redis-fail-mode: FAIL_CLOSED
   policies: {}
