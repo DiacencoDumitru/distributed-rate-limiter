@@ -39,6 +39,9 @@ class RateLimitApiIntegrationTest {
     static void redisProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
+        registry.add("rate-limit.policies.it-fixed-policy.strategy", () -> "FIXED_WINDOW");
+        registry.add("rate-limit.policies.it-fixed-policy.limit", () -> "2");
+        registry.add("rate-limit.policies.it-fixed-policy.window-seconds", () -> "10");
     }
 
     @Test
@@ -468,6 +471,53 @@ class RateLimitApiIntegrationTest {
     }
 
     @Test
+    void checkShouldApplyPolicyPresetWithoutExplicitLimits() throws Exception {
+        String request = """
+                {
+                  "key":"policy-preset-user",
+                  "strategy":"FIXED_WINDOW",
+                  "policyId":"it-fixed-policy"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true))
+                .andExpect(header().string("X-RateLimit-Limit", "2"));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.allowed").value(false));
+    }
+
+    @Test
+    void checkShouldReturnBadRequestForUnknownPolicyId() throws Exception {
+        String request = """
+                {
+                  "key":"policy-unknown-user",
+                  "strategy":"FIXED_WINDOW",
+                  "policyId":"does-not-exist"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/rate-limit/check")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Unknown policyId"));
+    }
+
+    @Test
     void fixedWindowShouldReturnBadRequestWhenRequiredFieldIsMissing() throws Exception {
         String request = """
                 {
@@ -483,9 +533,8 @@ class RateLimitApiIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.error").value("Bad Request"))
-                .andExpect(jsonPath("$.message").value("Validation failed"))
-                .andExpect(jsonPath("$.path").value("/api/v1/rate-limit/check"))
-                .andExpect(jsonPath("$.fieldErrors.limit").exists());
+                .andExpect(jsonPath("$.message").value("limit is required"))
+                .andExpect(jsonPath("$.path").value("/api/v1/rate-limit/check"));
     }
 
     @Test
@@ -501,7 +550,8 @@ class RateLimitApiIntegrationTest {
         mockMvc.perform(post("/api/v1/rate-limit/check")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("capacity is required"));
     }
 
     @Test
@@ -714,7 +764,8 @@ class RateLimitApiIntegrationTest {
         mockMvc.perform(post("/api/v1/rate-limit/check")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("windowSeconds is required"));
     }
 
     @Test
