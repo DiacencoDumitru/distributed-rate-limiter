@@ -1,6 +1,6 @@
 package com.example.ratelimiter.api;
 
-import com.example.ratelimiter.service.RateLimitResult;
+import com.example.ratelimiter.service.RateLimitCheckOutcome;
 import com.example.ratelimiter.service.RateLimiterService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -22,26 +22,19 @@ public class RateLimitController {
 
     @PostMapping("/check")
     public ResponseEntity<RateLimitResponse> check(@Valid @RequestBody RateLimitRequest request) {
-        RateLimitResult result = rateLimiterService.check(request);
+        RateLimitCheckOutcome outcome = rateLimiterService.check(request);
         RateLimitResponse response = new RateLimitResponse(
-                result.allowed(),
-                result.remaining(),
-                result.retryAfterSeconds()
+                outcome.result().allowed(),
+                outcome.result().remaining(),
+                outcome.result().retryAfterSeconds()
         );
-        HttpStatus status = result.allowed() ? HttpStatus.OK : HttpStatus.TOO_MANY_REQUESTS;
-        long limit = resolveLimit(request);
+        HttpStatus status = outcome.result().allowed() ? HttpStatus.OK : HttpStatus.TOO_MANY_REQUESTS;
         return ResponseEntity.status(status)
-                .header("X-RateLimit-Limit", String.valueOf(limit))
-                .header("X-RateLimit-Remaining", String.valueOf(result.remaining()))
-                .header(HttpHeaders.RETRY_AFTER, result.allowed() ? "0" : String.valueOf(Math.max(1, result.retryAfterSeconds())))
+                .header("X-RateLimit-Limit", String.valueOf(outcome.limit()))
+                .header("X-RateLimit-Remaining", String.valueOf(outcome.result().remaining()))
+                .header(
+                        HttpHeaders.RETRY_AFTER,
+                        outcome.result().allowed() ? "0" : String.valueOf(Math.max(1, outcome.result().retryAfterSeconds())))
                 .body(response);
-    }
-
-    private long resolveLimit(RateLimitRequest request) {
-        return switch (request) {
-            case FixedWindowRateLimitRequest fixedWindowRateLimitRequest -> fixedWindowRateLimitRequest.limit();
-            case TokenBucketRateLimitRequest tokenBucketRateLimitRequest -> tokenBucketRateLimitRequest.capacity();
-            case SlidingWindowRateLimitRequest slidingWindowRateLimitRequest -> slidingWindowRateLimitRequest.limit();
-        };
     }
 }

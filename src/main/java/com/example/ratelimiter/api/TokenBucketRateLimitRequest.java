@@ -7,7 +7,8 @@ import jakarta.validation.constraints.NotNull;
 public record TokenBucketRateLimitRequest(
         @NotBlank String key,
         @NotNull RateLimitStrategy strategy,
-        @NotNull @Min(1) Long capacity,
-        @NotNull @Min(1) Long refillSeconds
+        String policyId,
+        @Min(1) Long capacity,
+        @Min(1) Long refillSeconds
 ) implements RateLimitRequest {
 }

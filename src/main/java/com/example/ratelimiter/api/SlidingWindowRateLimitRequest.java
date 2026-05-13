@@ -7,7 +7,8 @@ import jakarta.validation.constraints.NotNull;
 public record SlidingWindowRateLimitRequest(
         @NotBlank String key,
         @NotNull RateLimitStrategy strategy,
-        @NotNull @Min(1) Long limit,
-        @NotNull @Min(1) Long windowSeconds
+        String policyId,
+        @Min(1) Long limit,
+        @Min(1) Long windowSeconds
 ) implements RateLimitRequest {
 }

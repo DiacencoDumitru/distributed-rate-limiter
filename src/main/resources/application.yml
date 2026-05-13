@@ -32,3 +32,6 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui
+
+rate-limit:
+  policies: {}
